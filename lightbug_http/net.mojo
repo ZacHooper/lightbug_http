@@ -2,6 +2,20 @@ from lightbug_http.strings import NetworkType
 from lightbug_http.io.bytes import Bytes
 from lightbug_http.io.sync import Duration
 from lightbug_http.sys.net import SysConnection
+from external.libc import (
+    AF_INET,
+    SOCK_STREAM,
+    AI_PASSIVE,
+    c_int,
+    c_char,
+    in_addr,
+    addrinfo,
+    sockaddr_in,
+    getaddrinfo,
+    gai_strerror,
+    to_char_ptr,
+    c_charptr_to_string,
+)
 
 alias default_buffer_size = 4096
 alias default_tcp_keep_alive = Duration(15 * 1000 * 1000 * 1000)  # 15 seconds
@@ -201,3 +215,54 @@ fn split_host_port(hostport: String) raises -> HostPort:
     if host == "":
         raise Error("missing host")
     return HostPort(host, port)
+
+
+fn get_addr_info(host: String) raises -> addrinfo:
+    var servinfo = Pointer[addrinfo]().alloc(1)
+    servinfo.store(addrinfo())
+
+    var hints = addrinfo()
+    hints.ai_family = AF_INET
+    hints.ai_socktype = SOCK_STREAM
+    hints.ai_flags = AI_PASSIVE
+
+    var host_ptr = to_char_ptr(host)
+
+    var status = getaddrinfo(
+        host_ptr,
+        Pointer[UInt8](),
+        Pointer.address_of(hints),
+        Pointer.address_of(servinfo),
+    )
+    if status != 0:
+        print("getaddrinfo failed to execute with status:", status)
+        var msg_ptr = gai_strerror(c_int(status))
+        _ = external_call["printf", c_int, Pointer[c_char], Pointer[c_char]](
+            to_char_ptr("gai_strerror: %s"), msg_ptr
+        )
+        var msg = c_charptr_to_string(msg_ptr)
+        print("getaddrinfo error message: ", msg)
+
+    if not servinfo:
+        print("servinfo is null")
+        raise Error("Failed to get address info. Pointer to addrinfo is null.")
+
+    return servinfo.load()
+
+
+fn get_ip_address(host: String) raises -> in_addr:
+    """Get the IP address of a host as binary."""
+    # Call getaddrinfo to get the IP address of the host.
+    var addrinfo = get_addr_info(host)
+    var ai_addr = addrinfo.ai_addr
+    if not ai_addr:
+        print("ai_addr is null")
+        raise Error(
+            "Failed to get IP address. getaddrinfo was called successfully, but ai_addr"
+            " is null."
+        )
+
+    # Cast sockaddr struct to sockaddr_in struct and convert the binary IP to a string using inet_ntop.
+    var addr_in = ai_addr.bitcast[sockaddr_in]().load()
+
+    return addr_in.sin_addr

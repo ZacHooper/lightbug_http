@@ -7,6 +7,7 @@ from lightbug_http.net import (
     resolve_internet_addr,
     default_buffer_size,
     default_tcp_keep_alive,
+    get_ip_address,
 )
 from lightbug_http.strings import NetworkType
 from lightbug_http.io.bytes import Bytes
@@ -29,6 +30,7 @@ from external.libc import (
     inet_pton,
     to_char_ptr,
     socket,
+    sockaddr_in,
     setsockopt,
     listen,
     accept,
@@ -37,6 +39,7 @@ from external.libc import (
     bind,
     shutdown,
     close,
+    connect,
 )
 
 
@@ -200,3 +203,35 @@ struct SysNet(Net):
 
     fn listen(inout self, network: String, addr: String) raises -> SysListener:
         return self.__lc.listen(network, addr)
+
+
+fn create_connection(sock: c_int, host: String, port: UInt16) raises -> SysConnection:
+    """Connect to a server using a socket.
+
+    Args:
+        sock: Int32 - The socket file descriptor.
+        host: String - The host to connect to.
+        port: UInt16 - The port to connect to.
+
+    Returns:
+        Int32 - The socket file descriptor.
+    """
+    var ip = get_ip_address(host)
+    # Convert ip address to network byte order.
+    var addr: sockaddr_in = sockaddr_in(
+        AF_INET, htons(port), ip, StaticTuple[8, c_char](0, 0, 0, 0, 0, 0, 0, 0)
+    )
+    var addr_ptr = Pointer[sockaddr_in].address_of(addr).bitcast[sockaddr]()
+
+    print("Connecting to server...")
+    if connect(sock, addr_ptr, sizeof[sockaddr_in]()) == -1:
+        _ = shutdown(sock, SHUT_RDWR)
+        print("Connection error")
+        raise Error("Failed to connect to server")
+
+    print("Connected to server")
+
+    var laddr = TCPAddr()
+    var raddr = TCPAddr(host, port.to_int())
+    var conn = SysConnection(sock, laddr, raddr)
+    return conn
